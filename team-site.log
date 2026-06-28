@@ -1,0 +1,17 @@
+$ bun run serve.ts
+22 |   }
+23 |   await Bun.sleep(500);
+24 | }
+25 | await Bun.write(PID_FILE, String(process.pid));
+26 | 
+27 | Bun.serve({
+         ^
+error: Failed to start server. Is port 3000 in use?
+ syscall: "listen",
+   errno: 0,
+    code: "EADDRINUSE"
+
+      at /home/team/shared/site/serve.ts:27:5
+
+Bun v1.3.14 (Linux x64)
+error: script "start" exited with code 1
