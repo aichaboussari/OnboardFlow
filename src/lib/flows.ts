@@ -1,5 +1,6 @@
 import { createServerFn } from '@tanstack/react-start';
 import db from './db';
+import { sendEmail } from './resend';
 
 const generateId = () => crypto.randomUUID();
 
@@ -76,17 +77,36 @@ export const createFlow = createServerFn({ method: 'POST' })
         insertTask.run(generateId(), flowId, task.task_name, 0, task.order_index);
       });
       
-      // Handle template (email log)
+      // Handle template (email sending and log)
       if (data.template_id) {
         const template = db.prepare('SELECT subject, body FROM email_templates WHERE id = ? AND business_id = ?').get(data.template_id, businessId) as any;
-        if (template) {
-          db.prepare('INSERT INTO email_logs (id, business_id, client_id, subject, body) VALUES (?, ?, ?, ?, ?)').run(
-            generateId(),
+        const client = db.prepare('SELECT email FROM clients WHERE id = ?').get(data.client_id) as { email: string } | undefined;
+        
+        if (template && client) {
+          // Log to DB first as pending
+          const logId = generateId();
+          db.prepare('INSERT INTO email_logs (id, business_id, client_id, subject, body, status) VALUES (?, ?, ?, ?, ?, ?)').run(
+            logId,
             businessId,
             data.client_id,
             template.subject,
-            template.body
+            template.body,
+            'pending'
           );
+
+          // Attempt real email send
+          sendEmail(client.email, template.subject, template.body)
+            .then(result => {
+              if (result.success) {
+                db.prepare('UPDATE email_logs SET status = ? WHERE id = ?').run('sent', logId);
+              } else {
+                db.prepare('UPDATE email_logs SET status = ? WHERE id = ?').run('failed', logId);
+              }
+            })
+            .catch(err => {
+              console.error('Background email send error:', err);
+              db.prepare('UPDATE email_logs SET status = ? WHERE id = ?').run('failed', logId);
+            });
         }
       }
     });

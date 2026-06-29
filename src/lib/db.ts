@@ -95,6 +95,7 @@ db.exec(`
     client_id TEXT,
     subject TEXT,
     body TEXT,
+    status TEXT DEFAULT 'pending',
     sent_at TEXT DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (business_id) REFERENCES businesses(id),
     FOREIGN KEY (client_id) REFERENCES clients(id)
@@ -110,6 +111,17 @@ try {
   }
 } catch (e) {
   console.error("Migration error (clients.notes):", e);
+}
+
+// Migration safety: Ensure 'status' column exists in email_logs table
+try {
+  const tableInfo = db.prepare("PRAGMA table_info(email_logs)").all() as any[];
+  const hasStatus = tableInfo.some(col => col.name === 'status');
+  if (!hasStatus) {
+    db.exec("ALTER TABLE email_logs ADD COLUMN status TEXT DEFAULT 'pending';");
+  }
+} catch (e) {
+  console.error("Migration error (email_logs.status):", e);
 }
 
 export default db;
