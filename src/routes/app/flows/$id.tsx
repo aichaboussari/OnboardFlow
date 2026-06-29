@@ -1,7 +1,7 @@
 import { createFileRoute, Link, useParams } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 import { getFlowDetail, updateTaskStatus } from '../../../lib/flows';
-import { addDocument, signDocument, deleteDocument } from '../../../lib/documents';
+import { uploadDocument, getDocument, signDocument, deleteDocument } from '../../../lib/documents';
 
 export const Route = createFileRoute('/app/flows/$id')({
   component: FlowDetailComponent,
@@ -11,8 +11,8 @@ function FlowDetailComponent() {
   const { id } = useParams({ from: '/app/flows/$id' });
   const [flow, setFlow] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [docName, setDocName] = useState('');
-  const [docPath, setDocPath] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [error, setError] = useState('');
 
   const fetchDetail = async () => {
@@ -35,34 +35,63 @@ function FlowDetailComponent() {
   const handleTaskToggle = async (taskId: string, currentStatus: number) => {
     const sessionId = localStorage.getItem('sessionId');
     if (!sessionId) return;
-    
-    await updateTaskStatus({ 
-      data: { 
-        sessionId, 
-        flowId: id as string, 
-        taskId, 
-        completed: !currentStatus 
-      } 
+    await updateTaskStatus({
+      data: {
+        sessionId,
+        flowId: id as string,
+        taskId,
+        completed: !currentStatus
+      }
     });
     fetchDetail();
   };
 
-  const handleAddDoc = async (e: React.FormEvent) => {
+  const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!selectedFile) return;
+    
     const sessionId = localStorage.getItem('sessionId');
     if (!sessionId) return;
     
-    await addDocument({ 
-      data: { 
-        sessionId, 
-        flow_id: id as string, 
-        name: docName, 
-        file_path: docPath 
-      } 
-    });
-    setDocName('');
-    setDocPath('');
-    fetchDetail();
+    setUploading(true);
+    try {
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const base64 = (reader.result as string).split(',')[1];
+        await uploadDocument({
+          data: {
+            sessionId,
+            flowId: id as string,
+            fileName: selectedFile.name,
+            fileContent: base64
+          }
+        });
+        setSelectedFile(null);
+        const fileInput = document.getElementById('fileInput') as HTMLInputElement;
+        if (fileInput) fileInput.value = '';
+        fetchDetail();
+        setUploading(false);
+      };
+      reader.readAsDataURL(selectedFile);
+    } catch (err: any) {
+      alert('Upload failed: ' + err.message);
+      setUploading(false);
+    }
+  };
+
+  const handleDownload = async (docId: string) => {
+    const sessionId = localStorage.getItem('sessionId');
+    if (!sessionId) return;
+    
+    try {
+      const { fileName, fileContent } = await getDocument({ data: { sessionId, documentId: docId } });
+      const link = document.createElement('a');
+      link.href = `data:application/octet-stream;base64,${fileContent}`;
+      link.download = fileName;
+      link.click();
+    } catch (err: any) {
+      alert('Download failed: ' + err.message);
+    }
   };
 
   const handleSignDoc = async (docId: string) => {
@@ -136,14 +165,19 @@ function FlowDetailComponent() {
               {flow.documents.map((doc: any) => (
                 <div key={doc.id} className="flex items-start justify-between p-3 bg-gray-50 dark:bg-gray-900/50 rounded-lg border border-gray-200 dark:border-gray-700">
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{doc.name}</p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{doc.file_path}</p>
+                    <button 
+                      onClick={() => handleDownload(doc.id)}
+                      className="text-sm font-medium text-indigo-600 hover:text-indigo-500 truncate block w-full text-left"
+                      title="Click to download"
+                    >
+                      {doc.name}
+                    </button>
                     {doc.signed ? (
                       <span className="mt-1 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400">
                         Signed
                       </span>
                     ) : (
-                      <button 
+                      <button
                         onClick={() => handleSignDoc(doc.id)}
                         className="mt-2 text-xs font-medium text-indigo-600 hover:text-indigo-500"
                       >
@@ -151,7 +185,7 @@ function FlowDetailComponent() {
                       </button>
                     )}
                   </div>
-                  <button 
+                  <button
                     onClick={() => handleDeleteDoc(doc.id)}
                     className="ml-2 p-1 text-gray-400 hover:text-red-600 transition-colors"
                   >
@@ -164,32 +198,25 @@ function FlowDetailComponent() {
               {flow.documents.length === 0 && (
                 <p className="text-sm text-center text-gray-500 dark:text-gray-400 italic">No documents uploaded.</p>
               )}
-
-              <form onSubmit={handleAddDoc} className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700 space-y-3">
-                <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">Add Document</p>
-                <input
-                  type="text"
-                  required
-                  placeholder="Doc Name (e.g. Contract)"
-                  className="block w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-                  value={docName}
-                  onChange={(e) => setDocName(e.target.value)}
-                />
-                <input
-                  type="text"
-                  required
-                  placeholder="File Path or URL"
-                  className="block w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-                  value={docPath}
-                  onChange={(e) => setDocPath(e.target.value)}
-                />
-                <button
-                  type="submit"
-                  className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-1.5 rounded text-sm font-medium transition-colors"
-                >
-                  Add Doc
-                </button>
-              </form>
+              
+              <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700 space-y-3">
+                <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">Upload Document</p>
+                <div className="space-y-2">
+                  <input
+                    id="fileInput"
+                    type="file"
+                    className="block w-full text-xs text-gray-500 file:mr-4 file:py-1 file:px-2 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 dark:file:bg-gray-700 dark:file:text-gray-300"
+                    onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+                  />
+                  <button
+                    onClick={handleUpload}
+                    disabled={!selectedFile || uploading}
+                    className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white py-1.5 rounded text-sm font-medium transition-colors"
+                  >
+                    {uploading ? 'Uploading...' : 'Upload Doc'}
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
